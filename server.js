@@ -78,7 +78,6 @@ if (MISSING.length) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const genAI    = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model    = genAI.getGenerativeModel({ model: 'gemini-1.5-pro' });
 
 // ─── Agent system prompt ─────────────────────────────────────────────────────
 
@@ -86,6 +85,12 @@ const AGENT_PROMPT = fs.readFileSync(
   path.join(__dirname, 'agent_prompt.md'),
   'utf8'
 );
+
+// System instruction must be set at model level, not at startChat level
+const model = genAI.getGenerativeModel({
+  model: 'gemini-1.5-pro',
+  systemInstruction: AGENT_PROMPT,
+});
 
 // ─── Express app ─────────────────────────────────────────────────────────────
 
@@ -259,7 +264,6 @@ async function callGemini(history, userMessage) {
     }));
 
   const chat = model.startChat({
-    systemInstruction: AGENT_PROMPT,
     history: chatHistory,
   });
 
