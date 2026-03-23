@@ -88,7 +88,7 @@ const AGENT_PROMPT = fs.readFileSync(
 
 // System instruction must be set at model level, not at startChat level
 const model = genAI.getGenerativeModel({
-  model: 'gemini-2.0-flash-lite',
+  model: 'gemini-2.5-flash',
   systemInstruction: AGENT_PROMPT,
 });
 
