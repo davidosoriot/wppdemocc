@@ -113,9 +113,6 @@ app.get('/webhook', (req, res) => {
 // ─── POST /webhook — Incoming WhatsApp messages ───────────────────────────────
 
 app.post('/webhook', async (req, res) => {
-  // Acknowledge immediately so Meta doesn't retry
-  res.sendStatus(200);
-
   console.log('[webhook] Payload received');
 
   try {
@@ -124,51 +121,49 @@ app.post('/webhook', async (req, res) => {
     const value   = change?.value;
     const message = value?.messages?.[0];
 
+    // Ignore status updates
+    if (value?.statuses) {
+      console.log('[webhook] Status update — skipping');
+      return res.sendStatus(200);
+    }
+
     // Ignore everything that isn't an inbound text message
     if (!message || message.type !== 'text') {
       console.log('[webhook] Non-text message or empty payload — skipping');
-      return;
+      return res.sendStatus(200);
     }
 
-    // Ignore messages sent by the bot itself (status updates)
-    if (value?.statuses) {
-      console.log('[webhook] Status update — skipping');
-      return;
-    }
-
-    const phoneNumber = message.from;          // e.g. "521234567890"
+    const phoneNumber = message.from;
     const messageText = message.text.body;
 
     console.log(`[message] From: ${phoneNumber} | Text: "${messageText}"`);
 
     // ── 1. Resolve or create conversation ──────────────────────────────────
-
     const conversationId = await getOrCreateConversation(phoneNumber);
 
     // ── 2. Persist the user message ────────────────────────────────────────
-
     await saveMessage(conversationId, 'user', messageText);
 
     // ── 3. Build conversation history for context ──────────────────────────
-
     const history = await getRecentMessages(conversationId, 10);
 
     // ── 4. Call Gemini ─────────────────────────────────────────────────────
-
     const aiResponse = await callGemini(history, messageText);
 
     console.log(`[gemini] Response: "${aiResponse}"`);
 
     // ── 5. Persist the assistant message ──────────────────────────────────
-
     await saveMessage(conversationId, 'assistant', aiResponse);
 
     // ── 6. Send reply via WhatsApp Cloud API ───────────────────────────────
-
     await sendWhatsAppMessage(phoneNumber, aiResponse);
+
+    // Acknowledge after all processing is complete (critical for Vercel serverless)
+    res.sendStatus(200);
 
   } catch (err) {
     console.error('[webhook] Unhandled error:', err.message || err);
+    res.sendStatus(500);
   }
 });
 
