@@ -306,9 +306,15 @@ async function sendWhatsAppMessage(to, text) {
 }
 
 // ─── Start server ─────────────────────────────────────────────────────────────
+// In local development, start the HTTP server.
+// On Vercel (serverless), the app is exported and Vercel handles the binding.
 
-app.listen(PORT, () => {
-  console.log(`[startup] Server running on port ${PORT}`);
-  console.log(`[startup] Webhook URL: http://localhost:${PORT}/webhook`);
-  console.log('[startup] Expose with ngrok: ngrok http ' + PORT);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`[startup] Server running on port ${PORT}`);
+    console.log(`[startup] Webhook URL: http://localhost:${PORT}/webhook`);
+    console.log('[startup] Expose with ngrok: ngrok http ' + PORT);
+  });
+}
+
+module.exports = app;
