@@ -14,9 +14,12 @@
  *      WHATSAPP_PHONE_NUMBER_ID   — Phone Number ID from Meta App Dashboard
  *      WHATSAPP_VERIFY_TOKEN      — Any secret string you choose (used once
  *                                   to verify the webhook with Meta)
+ *      WHATSAPP_APP_SECRET        — App Secret (Meta App Dashboard → Basic Settings)
  *      GEMINI_API_KEY             — API key from Google AI Studio
  *      SUPABASE_URL               — Project URL from Supabase dashboard
  *      SUPABASE_SERVICE_ROLE_KEY  — Service role key (NOT the anon key)
+ *      BOT_ACTIVE                 — Set to "false" to disable the bot without
+ *                                   taking down the server (safe offboarding)
  *
  * 3. Run the database migrations:
  *      Paste supabase/schema.sql into the Supabase SQL Editor and execute it.
@@ -43,6 +46,7 @@
 require('dotenv').config();
 const express = require('express');
 const axios   = require('axios');
+const crypto  = require('crypto');
 const fs      = require('fs');
 const path    = require('path');
 const { createClient }       = require('@supabase/supabase-js');
@@ -54,16 +58,21 @@ const {
   WHATSAPP_ACCESS_TOKEN,
   WHATSAPP_PHONE_NUMBER_ID,
   WHATSAPP_VERIFY_TOKEN,
+  WHATSAPP_APP_SECRET,
   GEMINI_API_KEY,
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
   PORT = 3000,
 } = process.env;
 
+// BOT_ACTIVE defaults to true — set to "false" in env to silently disable the bot
+const BOT_ACTIVE = process.env.BOT_ACTIVE !== 'false';
+
 const MISSING = [
   ['WHATSAPP_ACCESS_TOKEN',     WHATSAPP_ACCESS_TOKEN],
   ['WHATSAPP_PHONE_NUMBER_ID',  WHATSAPP_PHONE_NUMBER_ID],
   ['WHATSAPP_VERIFY_TOKEN',     WHATSAPP_VERIFY_TOKEN],
+  ['WHATSAPP_APP_SECRET',       WHATSAPP_APP_SECRET],
   ['GEMINI_API_KEY',            GEMINI_API_KEY],
   ['SUPABASE_URL',              SUPABASE_URL],
   ['SUPABASE_SERVICE_ROLE_KEY', SUPABASE_SERVICE_ROLE_KEY],
@@ -86,16 +95,83 @@ const AGENT_PROMPT = fs.readFileSync(
   'utf8'
 );
 
-// System instruction must be set at model level, not at startChat level
 const model = genAI.getGenerativeModel({
   model: 'gemini-2.5-flash',
   systemInstruction: AGENT_PROMPT,
 });
 
+// ─── In-memory safety stores ──────────────────────────────────────────────────
+
+// Deduplication: messageId → timestamp. Prevents double-processing Meta retries.
+const processedIds = new Map();
+
+// Rate limiting: phoneNumber → { count, resetAt }
+const rateLimits = new Map();
+
 // ─── Express app ─────────────────────────────────────────────────────────────
 
+// Capture raw body buffer before JSON parsing — required for Meta signature validation
 const app = express();
-app.use(express.json());
+app.use(express.json({
+  verify: (req, _res, buf) => { req.rawBody = buf; },
+}));
+
+// ─── Security helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Validates the x-hub-signature-256 header sent by Meta on every POST.
+ * Rejects requests that don't come from Meta or have been tampered with.
+ */
+function verifyMetaSignature(req) {
+  const signature = req.headers['x-hub-signature-256'];
+  if (!signature) return false;
+  const expected = 'sha256=' + crypto
+    .createHmac('sha256', WHATSAPP_APP_SECRET)
+    .update(req.rawBody)
+    .digest('hex');
+  // timingSafeEqual prevents timing attacks
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expected)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns true if this message ID was already processed recently.
+ * Meta sometimes resends the same message — this prevents duplicate replies.
+ */
+function isDuplicate(messageId) {
+  const now = Date.now();
+  const TTL = 5 * 60 * 1000; // 5 minutes
+  for (const [id, ts] of processedIds) {
+    if (now - ts > TTL) processedIds.delete(id);
+  }
+  if (processedIds.has(messageId)) return true;
+  processedIds.set(messageId, now);
+  return false;
+}
+
+/**
+ * Returns true if the phone number has exceeded 10 messages per minute.
+ * Silently drops excess traffic without responding — responding with an error
+ * would itself generate more retries.
+ */
+function isRateLimited(phoneNumber) {
+  const now = Date.now();
+  const entry = rateLimits.get(phoneNumber) || { count: 0, resetAt: now + 60_000 };
+  if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + 60_000; }
+  entry.count++;
+  rateLimits.set(phoneNumber, entry);
+  if (entry.count > 10) {
+    console.warn(`[rate-limit] ${phoneNumber} exceeded 10 msg/min — skipping`);
+    return true;
+  }
+  return false;
+}
 
 // ─── GET /webhook — Meta verification handshake ───────────────────────────────
 
@@ -117,69 +193,102 @@ app.get('/webhook', (req, res) => {
 
 // ─── POST /webhook — Incoming WhatsApp messages ───────────────────────────────
 
-app.post('/webhook', async (req, res) => {
-  console.log('[webhook] Payload received');
-
-  try {
-    const entry   = req.body?.entry?.[0];
-    const change  = entry?.changes?.[0];
-    const value   = change?.value;
-    const message = value?.messages?.[0];
-
-    // Ignore status updates
-    if (value?.statuses) {
-      console.log('[webhook] Status update — skipping');
-      return res.sendStatus(200);
-    }
-
-    // Ignore everything that isn't an inbound text message
-    if (!message || message.type !== 'text') {
-      console.log('[webhook] Non-text message or empty payload — skipping');
-      return res.sendStatus(200);
-    }
-
-    const phoneNumber = message.from;
-    const messageText = message.text.body;
-
-    console.log(`[message] From: ${phoneNumber} | Text: "${messageText}"`);
-
-    // ── 1. Resolve or create conversation ──────────────────────────────────
-    const conversationId = await getOrCreateConversation(phoneNumber);
-
-    // ── 2. Persist the user message ────────────────────────────────────────
-    await saveMessage(conversationId, 'user', messageText);
-
-    // ── 3. Build conversation history for context ──────────────────────────
-    const history = await getRecentMessages(conversationId, 10);
-
-    // ── 4. Call Gemini ─────────────────────────────────────────────────────
-    const aiResponse = await callGemini(history, messageText);
-
-    console.log(`[gemini] Response: "${aiResponse}"`);
-
-    // ── 5. Persist the assistant message ──────────────────────────────────
-    await saveMessage(conversationId, 'assistant', aiResponse);
-
-    // ── 6. Send reply via WhatsApp Cloud API ───────────────────────────────
-    await sendWhatsAppMessage(phoneNumber, aiResponse);
-
-    // Acknowledge after all processing is complete (critical for Vercel serverless)
-    res.sendStatus(200);
-
-  } catch (err) {
-    console.error('[webhook] Unhandled error:', err.message || err);
-    res.sendStatus(500);
+app.post('/webhook', (req, res) => {
+  // Reject requests that don't carry a valid Meta signature
+  if (!verifyMetaSignature(req)) {
+    console.warn('[webhook] Invalid or missing signature — rejected');
+    return res.sendStatus(403);
   }
+
+  // Always ACK Meta immediately with 200. Never return 5xx:
+  // Meta retries non-2xx responses, which leads to duplicate messages and bans.
+  res.sendStatus(200);
+
+  // Process in background so any error here never blocks the ACK above
+  processIncomingMessage(req.body).catch(err => {
+    console.error('[webhook] Unhandled processing error:', err.message);
+  });
 });
+
+// ─── Core message processing ──────────────────────────────────────────────────
+
+async function processIncomingMessage(body) {
+  // Bot kill-switch: change BOT_ACTIVE=false in Vercel env for safe client offboarding.
+  // Meta still receives 200, the WhatsApp number keeps working, the bot just goes silent.
+  if (!BOT_ACTIVE) {
+    console.log('[bot] Inactive — message received but not processed');
+    return;
+  }
+
+  const entry   = body?.entry?.[0];
+  const change  = entry?.changes?.[0];
+  const value   = change?.value;
+
+  // Ignore delivery/read status updates — only process inbound messages
+  if (!value?.messages || value?.statuses) {
+    console.log('[webhook] Status update or empty payload — skipping');
+    return;
+  }
+
+  const message = value.messages[0];
+
+  // Only handle plain text messages
+  if (!message || message.type !== 'text') {
+    console.log('[webhook] Non-text message — skipping');
+    return;
+  }
+
+  const phoneNumber = message.from;
+  const messageText = message.text.body;
+  const messageId   = message.id;
+
+  // Deduplicate: Meta sometimes resends the same message if our ACK is slow
+  if (isDuplicate(messageId)) {
+    console.log(`[dedup] Message ${messageId} already processed — skipping`);
+    return;
+  }
+
+  // Rate limit: silently drop if user is sending too fast
+  if (isRateLimited(phoneNumber)) return;
+
+  console.log(`[message] From: ${phoneNumber} | Text: "${messageText}"`);
+
+  // ── 1. Resolve or create conversation ────────────────────────────────────
+  const conversationId = await getOrCreateConversation(phoneNumber);
+
+  // ── 2. Persist the user message ──────────────────────────────────────────
+  await saveMessage(conversationId, 'user', messageText);
+
+  // ── 3. Build conversation history for context ─────────────────────────────
+  const history = await getRecentMessages(conversationId, 10);
+
+  // ── 4. Call Gemini — fallback to friendly message on any error ────────────
+  let aiResponse;
+  try {
+    aiResponse = await callGemini(history, messageText);
+    console.log('[gemini] Response generated');
+  } catch (err) {
+    console.error('[gemini] Error:', err.message);
+    aiResponse = 'En este momento tengo un inconveniente técnico. Por favor escríbenos de nuevo en unos minutos o contáctanos directamente. 🙏';
+  }
+
+  // ── 5. Enforce WhatsApp's 4096-char message limit ─────────────────────────
+  const WA_MAX = 4000;
+  if (aiResponse.length > WA_MAX) {
+    aiResponse = aiResponse.substring(0, WA_MAX) + '\n\n_(Para más información, contáctanos directamente.)_';
+    console.warn('[whatsapp] Response truncated to 4000 chars');
+  }
+
+  // ── 6. Persist the assistant response ────────────────────────────────────
+  await saveMessage(conversationId, 'assistant', aiResponse);
+
+  // ── 7. Send reply via WhatsApp Cloud API ──────────────────────────────────
+  await sendWhatsAppMessage(phoneNumber, aiResponse);
+}
 
 // ─── Supabase helpers ─────────────────────────────────────────────────────────
 
-/**
- * Returns the conversation id for a phone number.
- * Creates a new conversation row if one doesn't exist yet.
- */
 async function getOrCreateConversation(phoneNumber) {
-  // Try to find existing conversation
   const { data: existing, error: selectError } = await supabase
     .from('conversations')
     .select('id')
@@ -193,7 +302,6 @@ async function getOrCreateConversation(phoneNumber) {
 
   if (existing) return existing.id;
 
-  // Create new conversation
   const { data: created, error: insertError } = await supabase
     .from('conversations')
     .insert({ phone_number: phoneNumber })
@@ -209,9 +317,6 @@ async function getOrCreateConversation(phoneNumber) {
   return created.id;
 }
 
-/**
- * Inserts a message row into the messages table.
- */
 async function saveMessage(conversationId, role, content) {
   const { error } = await supabase
     .from('messages')
@@ -223,10 +328,6 @@ async function saveMessage(conversationId, role, content) {
   }
 }
 
-/**
- * Returns the last `limit` messages for a conversation, oldest first,
- * so they can be fed to the model in chronological order.
- */
 async function getRecentMessages(conversationId, limit = 10) {
   const { data, error } = await supabase
     .from('messages')
@@ -240,42 +341,26 @@ async function getRecentMessages(conversationId, limit = 10) {
     throw error;
   }
 
-  // Reverse so oldest message comes first
   return (data || []).reverse();
 }
 
 // ─── Gemini helper ────────────────────────────────────────────────────────────
 
-/**
- * Sends the conversation history and the latest user message to Gemini.
- * Returns the model's plain-text response.
- *
- * @param {Array<{role: string, content: string}>} history  Previous messages
- * @param {string} userMessage  The new message from the user
- */
 async function callGemini(history, userMessage) {
-  // Build the chat history in the format Gemini expects
-  // Skip the very last message if it's the current user turn (already in userMessage)
   const chatHistory = history
-    .slice(0, -1) // exclude the message we just saved (current user turn)
+    .slice(0, -1)
     .map(({ role, content }) => ({
       role: role === 'assistant' ? 'model' : 'user',
       parts: [{ text: content }],
     }));
 
-  const chat = model.startChat({
-    history: chatHistory,
-  });
-
+  const chat = model.startChat({ history: chatHistory });
   const result = await chat.sendMessage(userMessage);
   return result.response.text();
 }
 
 // ─── WhatsApp Cloud API helper ────────────────────────────────────────────────
 
-/**
- * Sends a text message to a WhatsApp number via the Cloud API.
- */
 async function sendWhatsAppMessage(to, text) {
   const url = `https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
@@ -295,7 +380,6 @@ async function sendWhatsAppMessage(to, text) {
         },
       }
     );
-
     console.log(`[whatsapp] Message sent to ${to}`);
   } catch (err) {
     const detail = err.response?.data || err.message;
@@ -305,13 +389,12 @@ async function sendWhatsAppMessage(to, text) {
 }
 
 // ─── Start server ─────────────────────────────────────────────────────────────
-// In local development, start the HTTP server.
-// On Vercel (serverless), the app is exported and Vercel handles the binding.
 
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`[startup] Server running on port ${PORT}`);
     console.log(`[startup] Webhook URL: http://localhost:${PORT}/webhook`);
+    console.log(`[startup] Bot active: ${BOT_ACTIVE}`);
     console.log('[startup] Expose with ngrok: ngrok http ' + PORT);
   });
 }
