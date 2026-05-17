@@ -100,12 +100,7 @@ const model = genAI.getGenerativeModel({
   systemInstruction: AGENT_PROMPT,
 });
 
-// ─── In-memory safety stores ──────────────────────────────────────────────────
-
-// Deduplication: messageId → timestamp. Prevents double-processing Meta retries.
-const processedIds = new Map();
-
-// Rate limiting: phoneNumber → { count, resetAt }
+// Rate limiting: phoneNumber → { count, resetAt } (in-memory, per instance)
 const rateLimits = new Map();
 
 // ─── Express app ─────────────────────────────────────────────────────────────
@@ -141,17 +136,17 @@ function verifyMetaSignature(req) {
 }
 
 /**
- * Returns true if this message ID was already processed recently.
- * Meta sometimes resends the same message — this prevents duplicate replies.
+ * Atomically marks a message ID as processed in Supabase.
+ * Returns true if it was already processed (duplicate).
+ * Using DB instead of in-memory Map so it works across Vercel serverless instances.
  */
-function isDuplicate(messageId) {
-  const now = Date.now();
-  const TTL = 5 * 60 * 1000; // 5 minutes
-  for (const [id, ts] of processedIds) {
-    if (now - ts > TTL) processedIds.delete(id);
-  }
-  if (processedIds.has(messageId)) return true;
-  processedIds.set(messageId, now);
+async function isDuplicate(messageId) {
+  const { error } = await supabase
+    .from('processed_messages')
+    .insert({ message_id: messageId });
+
+  if (error?.code === '23505') return true; // unique constraint → already processed
+  if (error) throw error;
   return false;
 }
 
@@ -242,8 +237,8 @@ async function processIncomingMessage(body) {
   const messageText = message.text.body;
   const messageId   = message.id;
 
-  // Deduplicate: Meta sometimes resends the same message if our ACK is slow
-  if (isDuplicate(messageId)) {
+  // Deduplicate via Supabase — works across all Vercel serverless instances
+  if (await isDuplicate(messageId)) {
     console.log(`[dedup] Message ${messageId} already processed — skipping`);
     return;
   }
@@ -362,7 +357,7 @@ async function callGemini(history, userMessage) {
 // ─── WhatsApp Cloud API helper ────────────────────────────────────────────────
 
 async function sendWhatsAppMessage(to, text) {
-  const url = `https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
   try {
     await axios.post(

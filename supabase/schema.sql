@@ -41,3 +41,25 @@ $$;
 create or replace trigger trg_update_conversation_timestamp
 after insert on messages
 for each row execute function update_conversation_timestamp();
+
+-- Table: processed_messages
+-- Prevents duplicate processing when Meta resends the same webhook
+-- across different serverless instances (Vercel).
+create table if not exists processed_messages (
+  message_id text primary key,
+  created_at timestamp with time zone default now()
+);
+
+-- Auto-delete entries older than 10 minutes to keep the table small
+create or replace function cleanup_processed_messages()
+returns trigger language plpgsql as $$
+begin
+  delete from processed_messages
+  where created_at < now() - interval '10 minutes';
+  return new;
+end;
+$$;
+
+create or replace trigger trg_cleanup_processed_messages
+after insert on processed_messages
+for each row execute function cleanup_processed_messages();
