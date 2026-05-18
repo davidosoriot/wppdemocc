@@ -188,21 +188,24 @@ app.get('/webhook', (req, res) => {
 
 // ─── POST /webhook — Incoming WhatsApp messages ───────────────────────────────
 
-app.post('/webhook', (req, res) => {
+app.post('/webhook', async (req, res) => {
   // Reject requests that don't carry a valid Meta signature
   if (!verifyMetaSignature(req)) {
     console.warn('[webhook] Invalid or missing signature — rejected');
     return res.sendStatus(403);
   }
 
-  // Always ACK Meta immediately with 200. Never return 5xx:
-  // Meta retries non-2xx responses, which leads to duplicate messages and bans.
-  res.sendStatus(200);
-
-  // Process in background so any error here never blocks the ACK above
-  processIncomingMessage(req.body).catch(err => {
+  // On Vercel serverless, the function is frozen after res is sent.
+  // We must await all processing first, then respond 200.
+  // Gemini typically responds in 2-5s — well within Meta's 20s timeout.
+  try {
+    await processIncomingMessage(req.body);
+  } catch (err) {
     console.error('[webhook] Unhandled processing error:', err.message);
-  });
+  }
+
+  // Always 200 to Meta regardless of outcome — never 5xx
+  res.sendStatus(200);
 });
 
 // ─── Core message processing ──────────────────────────────────────────────────
