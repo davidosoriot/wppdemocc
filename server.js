@@ -352,6 +352,13 @@ async function callGemini(history, userMessage) {
       parts: [{ text: content }],
     }));
 
+  // Gemini requires the first message in history to be from 'user'.
+  // If the history window starts with a 'model' message, drop entries
+  // from the front until we reach a 'user' message.
+  while (chatHistory.length > 0 && chatHistory[0].role !== 'user') {
+    chatHistory.shift();
+  }
+
   const chat = model.startChat({ history: chatHistory });
   const result = await chat.sendMessage(userMessage);
   return result.response.text();
