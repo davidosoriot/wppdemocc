@@ -24,36 +24,50 @@ Su propósito es ofrecer una experiencia de desconexión real, bienestar y vida 
 
 ## Alojamientos disponibles
 
+💡 *Tarifas:* entre semana = lunes a viernes | fin de semana = sábado, domingo y festivos.
+
 **🌞 Habitación INTI** — hasta 4 personas
-1 cama 1.40m + 2 camas de 1.0m | Baño privado | WiFi | Lobby | Zona de trabajo | Ventilador | Cobijas, sábanas y toallas incluidas | Acceso a piscina de agua natural, granja, caminatas, paseos a caballo y charcos cercanos | A 10 min del parque principal
+1 cama 1.40m + 2 camas de 1.0m | Baño privado | WiFi | Lobby | Zona de trabajo | Ventilador | Cobijas, sábanas y toallas | Piscina de agua natural | Granja | Caminatas | Paseos a caballo | Charcos cercanos | A 10 min del parque
+💰 Entre semana: $120.000 | Fin de semana: $240.000
 🔗 Airbnb: https://es-l.airbnb.com/rooms/1428871135104816494
 
+**🌬️ Habitación WAYRA** — hasta 4 personas
+Cama doble + 2 camas sencillas | Baño privado | WiFi | Lobby | Zona de trabajo | Ventilador | Cobijas, sábanas y toallas | Piscina de agua natural | Granja | Caminatas | Paseos a caballo | Charcos cercanos | A 10 min del parque
+💰 Entre semana: $160.000 | Fin de semana: $300.000
+🔗 Airbnb: https://es-l.airbnb.com/rooms/1428875277586514822
+
 **🌿 Cabaña SAMIN** — hasta 2 personas
-Bioconstrucción en barro, paja y madera | Cama queen | Baño privado | Cocina equipada | WiFi | Terraza con vista al bosque | Charco natural, granja y cascadas cercanas | Refugio íntimo ideal para parejas
+Bioconstrucción en barro, paja y madera | Cama queen | Baño privado | Cocina equipada | WiFi | Terraza con vista al bosque | Charco natural | Granja | Cascadas cercanas | Refugio íntimo ideal para parejas
+💰 Entre semana: $100.000 | Fin de semana: $190.000
 🔗 Airbnb: https://es-l.airbnb.com/rooms/1311156671951571865
+
+**🌙 Habitación KILLA** — hasta 2 personas
+Cama king | Baño privado | WiFi | Lobby | Zona de trabajo | Ventilador | Piscina de agua natural | Granja | Caminatas | Charcos | Desayuno orgánico | A 10 min del parque
+💰 Entre semana: $100.000 | Fin de semana: $190.000
+🔗 Airbnb: https://es-l.airbnb.com/rooms/1428862033260079610
 
 **🪵 Cabaña QALA** — hasta 4 personas
 Arquitectura cálida en madera | Vista panorámica al bosque | Luz natural | Ambiente rústico y moderno | Alimentación consciente programable
+💰 Entre semana: $120.000 | Fin de semana: $240.000
 🔗 Airbnb: https://es-l.airbnb.com/rooms/1311236501508029791
 
-**🌙 Habitación KILLA** — hasta 2 personas
-Cama king | Baño privado | WiFi | Lobby | Zona de trabajo | Ventilador | Acceso a piscina de agua natural, granja, caminatas y charcos | Desayuno orgánico incluido | A 10 min del parque principal
-🔗 Airbnb: https://es-l.airbnb.com/rooms/1428862033260079610
-
 **🏡 Casa AYLLU** — hasta 10 personas
-Segundo piso de Casa Bosque | Estilo vintage | 5 camas | 2 baños | Vista 360° al bosque | Piscina | Asador | Barril grande | Granja | Lago de peces | Kiosco | Clima cálido de día y fresco de noche | Ideal para familias, grupos y celebraciones | Acceso para cualquier vehículo
+Segundo piso de Casa Bosque | Estilo vintage | 5 camas | 2 baños | Vista 360° al bosque | Piscina | Asador | Barril grande | Granja | Lago de peces | Kiosco | Clima cálido de día y fresco de noche | Ideal para familias, grupos y celebraciones
+💰 Entre semana: $350.000 | Fin de semana: $574.000
 🔗 Airbnb: https://es-l.airbnb.com/rooms/1004496002228801776
 
 **🏘️ Casa SUMAQ** — hasta 12 personas
 Primer piso de Casa Bosque | Estilo vintage | 3 habitaciones | 7 camas | 4 baños | Vista 360° al bosque | Piscina | Asador | Barril grande | Granja | Lago de peces | Kiosco | Ideal para familias y eventos
+💰 Entre semana: $500.000 | Fin de semana: $850.000
 🔗 Airbnb: https://es-l.airbnb.com/rooms/1588047438115535888
 
 **🌲 Casa BOSQUE completa** — hasta 25 personas
 Casa finca de 2 pisos | 5 habitaciones | 7 baños | 12 camas | Piscina | Asador | Barril | Granja | Lago de peces | Kiosco | Vista al bosque | Acceso para cualquier vehículo | Ideal para eventos grandes, retiros y grupos numerosos
+💰 Entre semana: $720.000 | Fin de semana: $1.200.000
 🔗 Airbnb: https://es-l.airbnb.com/rooms/1461720707150819064
 
-Todos los alojamientos tienen disponible alimentación consciente programable (desayuno, almuerzo y cena).
-Los precios por noche de cada alojamiento se confirman con el equipo o en el link de Airbnb.
+Todos los alojamientos incluyen alimentación consciente programable (desayuno, almuerzo y cena).
+Para confirmar disponibilidad contactar a Juan (314-6339706) o Luz (301-2365375).
 
 ---
 
