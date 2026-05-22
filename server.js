@@ -288,7 +288,7 @@ async function processIncomingMessage(body) {
   // ── 4. Call Gemini — fallback to friendly message on any error ────────────
   let aiResponse;
   try {
-    aiResponse = await callGemini(history, messageText);
+    aiResponse = await callGemini(history, messageText, phoneNumber);
     console.log('[gemini] Response generated');
   } catch (err) {
     console.error('[gemini] Error:', err.message);
@@ -369,7 +369,7 @@ async function getRecentMessages(conversationId, limit = 10) {
 
 // ─── Gemini helper ────────────────────────────────────────────────────────────
 
-async function callGemini(history, userMessage) {
+async function callGemini(history, userMessage, phoneNumber) {
   const chatHistory = history
     .slice(0, -1)
     .map(({ role, content }) => ({
@@ -394,7 +394,7 @@ async function callGemini(history, userMessage) {
 
     let toolResult;
     if (call.name === 'escalate_to_human') {
-      toolResult = await handleEscalation(call.args);
+      toolResult = await handleEscalation(call.args, phoneNumber);
     } else {
       toolResult = { error: 'Unknown function' };
     }
@@ -411,9 +411,9 @@ async function callGemini(history, userMessage) {
 
 // ─── Escalation handler ───────────────────────────────────────────────────────
 
-async function handleEscalation(args) {
+async function handleEscalation(args, phoneNumber) {
   try {
-    await sendEscalationEmail(args);
+    await sendEscalationEmail(args, phoneNumber);
     console.log('[escalation] Email sent for guest:', args.guest_name);
     return { success: true };
   } catch (err) {
@@ -422,7 +422,7 @@ async function handleEscalation(args) {
   }
 }
 
-async function sendEscalationEmail({ guest_name, arrival_date, departure_date, num_people, accommodation, special_requests }) {
+async function sendEscalationEmail({ guest_name, arrival_date, departure_date, num_people, accommodation, special_requests }, phoneNumber) {
   const accom   = accommodation    || 'No especificado';
   const notes   = special_requests || 'Ninguna';
 
@@ -430,6 +430,7 @@ async function sendEscalationEmail({ guest_name, arrival_date, departure_date, n
     <h2>Nueva solicitud de reserva — Ecohotel Pure</h2>
     <table cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:sans-serif;font-size:15px;">
       <tr><td><strong>Nombre</strong></td><td>${guest_name}</td></tr>
+      <tr><td><strong>WhatsApp</strong></td><td>+${phoneNumber}</td></tr>
       <tr><td><strong>Llegada</strong></td><td>${arrival_date}</td></tr>
       <tr><td><strong>Salida</strong></td><td>${departure_date}</td></tr>
       <tr><td><strong>Personas</strong></td><td>${num_people}</td></tr>
