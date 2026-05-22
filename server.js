@@ -64,7 +64,7 @@ const {
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
   RESEND_API_KEY,
-  ESCALATION_EMAIL = 'mgarciac10@eafit.edu.co',
+  ESCALATION_EMAIL,
   PORT = 3000,
 } = process.env;
 
@@ -80,6 +80,7 @@ const MISSING = [
   ['SUPABASE_URL',              SUPABASE_URL],
   ['SUPABASE_SERVICE_ROLE_KEY', SUPABASE_SERVICE_ROLE_KEY],
   ['RESEND_API_KEY',            RESEND_API_KEY],
+  ['ESCALATION_EMAIL',          ESCALATION_EMAIL],
 ].filter(([, v]) => !v).map(([k]) => k);
 
 if (MISSING.length) {
