@@ -51,6 +51,7 @@ const fs      = require('fs');
 const path    = require('path');
 const { createClient }       = require('@supabase/supabase-js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { Resend }             = require('resend');
 
 // ─── Environment ─────────────────────────────────────────────────────────────
 
@@ -62,6 +63,8 @@ const {
   GEMINI_API_KEY,
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
+  RESEND_API_KEY,
+  ESCALATION_EMAIL = 'mgarciac10@eafit.edu.co',
   PORT = 3000,
 } = process.env;
 
@@ -76,6 +79,7 @@ const MISSING = [
   ['GEMINI_API_KEY',            GEMINI_API_KEY],
   ['SUPABASE_URL',              SUPABASE_URL],
   ['SUPABASE_SERVICE_ROLE_KEY', SUPABASE_SERVICE_ROLE_KEY],
+  ['RESEND_API_KEY',            RESEND_API_KEY],
 ].filter(([, v]) => !v).map(([k]) => k);
 
 if (MISSING.length) {
@@ -87,6 +91,7 @@ if (MISSING.length) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const genAI    = new GoogleGenerativeAI(GEMINI_API_KEY);
+const resend   = new Resend(RESEND_API_KEY);
 
 // ─── Agent system prompt ─────────────────────────────────────────────────────
 
@@ -95,9 +100,29 @@ const AGENT_PROMPT = fs.readFileSync(
   'utf8'
 );
 
+const ESCALATE_TOOL = {
+  functionDeclarations: [{
+    name: 'escalate_to_human',
+    description: 'Notifica al equipo del hotel sobre una solicitud de reserva. Llama esta función solo cuando el cliente haya proporcionado su nombre, fechas de llegada y salida, y número de personas.',
+    parameters: {
+      type: 'OBJECT',
+      properties: {
+        guest_name:       { type: 'STRING',  description: 'Nombre completo del huésped' },
+        arrival_date:     { type: 'STRING',  description: 'Fecha de llegada (dd/mm/aaaa)' },
+        departure_date:   { type: 'STRING',  description: 'Fecha de salida (dd/mm/aaaa)' },
+        num_people:       { type: 'INTEGER', description: 'Número de personas' },
+        accommodation:    { type: 'STRING',  description: 'Tipo de alojamiento solicitado (si lo mencionó)' },
+        special_requests: { type: 'STRING',  description: 'Solicitudes especiales o notas adicionales' },
+      },
+      required: ['guest_name', 'arrival_date', 'departure_date', 'num_people'],
+    },
+  }],
+};
+
 const model = genAI.getGenerativeModel({
   model: 'gemini-2.5-flash',
   systemInstruction: AGENT_PROMPT,
+  tools: [ESCALATE_TOOL],
 });
 
 // Rate limiting: phoneNumber → { count, resetAt } (in-memory, per instance)
@@ -359,9 +384,69 @@ async function callGemini(history, userMessage) {
     chatHistory.shift();
   }
 
-  const chat = model.startChat({ history: chatHistory });
+  const chat   = model.startChat({ history: chatHistory });
   const result = await chat.sendMessage(userMessage);
+  const calls  = result.response.functionCalls();
+
+  if (calls && calls.length > 0) {
+    const call = calls[0];
+    console.log(`[gemini] Function call: ${call.name}`, call.args);
+
+    let toolResult;
+    if (call.name === 'escalate_to_human') {
+      toolResult = await handleEscalation(call.args);
+    } else {
+      toolResult = { error: 'Unknown function' };
+    }
+
+    // Feed the function result back so Gemini generates the final user-facing reply
+    const followUp = await chat.sendMessage([{
+      functionResponse: { name: call.name, response: toolResult },
+    }]);
+    return followUp.response.text();
+  }
+
   return result.response.text();
+}
+
+// ─── Escalation handler ───────────────────────────────────────────────────────
+
+async function handleEscalation(args) {
+  try {
+    await sendEscalationEmail(args);
+    console.log('[escalation] Email sent for guest:', args.guest_name);
+    return { success: true };
+  } catch (err) {
+    console.error('[escalation] Failed to send email:', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+async function sendEscalationEmail({ guest_name, arrival_date, departure_date, num_people, accommodation, special_requests }) {
+  const accom   = accommodation    || 'No especificado';
+  const notes   = special_requests || 'Ninguna';
+
+  const html = `
+    <h2>Nueva solicitud de reserva — Ecohotel Pure</h2>
+    <table cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-family:sans-serif;font-size:15px;">
+      <tr><td><strong>Nombre</strong></td><td>${guest_name}</td></tr>
+      <tr><td><strong>Llegada</strong></td><td>${arrival_date}</td></tr>
+      <tr><td><strong>Salida</strong></td><td>${departure_date}</td></tr>
+      <tr><td><strong>Personas</strong></td><td>${num_people}</td></tr>
+      <tr><td><strong>Alojamiento</strong></td><td>${accom}</td></tr>
+      <tr><td><strong>Solicitudes especiales</strong></td><td>${notes}</td></tr>
+    </table>
+    <p style="margin-top:16px;color:#555;">Este mensaje fue generado automáticamente por el asistente de WhatsApp de Ecohotel Pure.</p>
+  `;
+
+  const { error } = await resend.emails.send({
+    from:    'Ecohotel Pure <onboarding@resend.dev>',
+    to:      ESCALATION_EMAIL,
+    subject: `Reserva: ${guest_name} · ${arrival_date} → ${departure_date}`,
+    html,
+  });
+
+  if (error) throw new Error(error.message);
 }
 
 // ─── WhatsApp Cloud API helper ────────────────────────────────────────────────
